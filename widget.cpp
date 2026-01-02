@@ -21,7 +21,7 @@ Widget::~Widget()
     delete ui;
 }
 
-// 启动服务器按钮点击事件
+// 启动服务器按钮点击事件d
 void Widget::on_startBtn_clicked()
 {
     int port = 1234;  // 监听端口（自定义，1024-65535 之间，避免用 80、443 等常用端口）
