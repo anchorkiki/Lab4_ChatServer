@@ -193,10 +193,6 @@ void Widget::read_client_message()
         userListJson.insert("userList", userArray);
         QJsonDocument userListDoc(userListJson);
         senderSocket->write(userListDoc.toJson(QJsonDocument::Compact));
-
-    } else if (messageType == "disconnect") {
-        // 处理断开连接消息（客户端正常断开时发送）
-        // 类似上面的处理
     }
 }
 
