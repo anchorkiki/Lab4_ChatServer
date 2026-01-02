@@ -70,7 +70,7 @@ void Widget::on_new_client_connected()
     connect(clientSocket, &QTcpSocket::disconnected, this, &Widget::client_disconnected);
 }
 
-// 读取客户端消息
+// 读取客户端消息并广播
 void Widget::read_client_message()
 {
     QTcpSocket *senderSocket = qobject_cast<QTcpSocket*>(sender());
@@ -83,7 +83,27 @@ void Widget::read_client_message()
     QJsonDocument jsonDoc = QJsonDocument::fromJson(messageData, &jsonError);
 
     if (jsonError.error != QJsonParseError::NoError) {
-        // ... 原有代码保持不变 ...
+        // 如果不是有效的 JSON，可能是旧版本客户端，按普通文本处理
+        QString message = QString::fromUtf8(messageData);
+        QString rawIP = senderSocket->peerAddress().toString();
+        QString cleanIP = formatClientIP(rawIP);
+        QString broadcastMessage = QString("[%1:%2] %3")
+                                       .arg(cleanIP)
+                                       .arg(senderSocket->peerPort())
+                                       .arg(message);
+
+        // 广播消息
+        for (QTcpSocket *socket : clientSockets) {
+            if (socket == senderSocket) continue;
+            if (socket->state() == QTcpSocket::ConnectedState) {
+                socket->write(broadcastMessage.toUtf8());
+            }
+        }
+
+        QString log = QString("[%1] 转发消息 → %2")
+                          .arg(QDateTime::currentDateTime().toString("HH:mm:ss"))
+                          .arg(broadcastMessage);
+        ui->logTextEdit->append(log);
         return;
     }
 
@@ -93,7 +113,41 @@ void Widget::read_client_message()
     QString messageType = jsonObj.value("type").toString();
 
     if (messageType == "message") {
-        // ... 原有代码保持不变 ...
+        // 处理普通消息
+        QString content = jsonObj.value("content").toString();
+        QString senderName = jsonObj.value("sender").toString(); // 客户端可以指定昵称
+
+        // 如果客户端没有指定昵称，使用 IP:端口
+        if (senderName.isEmpty()) {
+            QString rawIP = senderSocket->peerAddress().toString();
+            QString cleanIP = formatClientIP(rawIP);
+            senderName = QString("%1:%2").arg(cleanIP).arg(senderSocket->peerPort());
+        }
+
+        // 创建广播消息 JSON
+        QJsonObject broadcastJson;
+        broadcastJson.insert("type", "broadcast");
+        broadcastJson.insert("sender", senderName);
+        broadcastJson.insert("content", content);
+        broadcastJson.insert("time", QDateTime::currentDateTime().toString("HH:mm:ss"));
+
+        QJsonDocument broadcastDoc(broadcastJson);
+        QByteArray broadcastData = broadcastDoc.toJson(QJsonDocument::Compact);
+
+        // 广播消息
+        for (QTcpSocket *socket : clientSockets) {
+            if (socket == senderSocket) continue;
+            if (socket->state() == QTcpSocket::ConnectedState) {
+                socket->write(broadcastData);
+            }
+        }
+
+        // 更新服务器日志
+        QString log = QString("[%1] 转发消息 → 来自: %2, 内容: %3")
+                          .arg(QDateTime::currentDateTime().toString("HH:mm:ss"))
+                          .arg(senderName)
+                          .arg(content);
+        ui->logTextEdit->append(log);
 
     } else if (messageType == "connect") {
         // 处理连接消息（客户端首次连接时发送）
@@ -112,7 +166,7 @@ void Widget::read_client_message()
         // 通知其他客户端有新用户加入
         QJsonObject notifyJson;
         notifyJson.insert("type", "user_join");
-        notifyJson.insert("username", clientName);
+        notifyJson.insert("username", clientName.isEmpty() ? cleanIP : clientName);
         notifyJson.insert("time", QDateTime::currentDateTime().toString("HH:mm:ss"));
 
         // 添加当前在线用户列表
