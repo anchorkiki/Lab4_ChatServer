@@ -1,0 +1,10 @@
+# Qt项目忽略规则
+build/
+*.pro.user
+*.o
+*.so
+*.dll
+Makefile
+moc_*
+ui_*
+qrc_*
