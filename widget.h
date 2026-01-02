@@ -5,6 +5,9 @@
 #include <QTcpServer>  // 服务器类（监听连接）
 #include <QTcpSocket>  // 通信套接字类（和客户端通信）
 #include <QList>       // 存储所有连接的客户端套接字
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonParseError>
 
 namespace Ui {
 class Widget;

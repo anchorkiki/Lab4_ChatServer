@@ -72,40 +72,107 @@ void Widget::on_new_client_connected()
 // 读取客户端消息并广播
 void Widget::read_client_message()
 {
-    // 找到发送消息的客户端套接字（sender() 返回触发信号的对象）
     QTcpSocket *senderSocket = qobject_cast<QTcpSocket*>(sender());
-    if (!senderSocket) return;  // 防止空指针
+    if (!senderSocket) return;
 
-    // 读取消息（QTcpSocket 用 readAll() 读取所有可用数据）
     QByteArray messageData = senderSocket->readAll();
-    QString message = QString::fromUtf8(messageData);  // 转换为 UTF-8 字符串（避免乱码）
 
-    // 拼接消息（包含发送者的 IP 和端口）
-    QString rawIP = senderSocket->peerAddress().toString();
-    QString cleanIP = formatClientIP(rawIP);
-    // 拼接广播消息（简洁格式）
-    QString broadcastMessage = QString("[%1:%2] %3")
-                                   .arg(cleanIP)
-                                   .arg(senderSocket->peerPort())
-                                   .arg(message);
+    // 解析 JSON
+    QJsonParseError jsonError;
+    QJsonDocument jsonDoc = QJsonDocument::fromJson(messageData, &jsonError);
 
-    // 广播消息：遍历所有客户端，发送消息
-    for (QTcpSocket *socket : clientSockets) {
-        if (socket == senderSocket) {
-            continue; // 跳过当前发送者，不发送给自己
+    if (jsonError.error != QJsonParseError::NoError) {
+        // 如果不是有效的 JSON，可能是旧版本客户端，按普通文本处理
+        QString message = QString::fromUtf8(messageData);
+        QString rawIP = senderSocket->peerAddress().toString();
+        QString cleanIP = formatClientIP(rawIP);
+        QString broadcastMessage = QString("[%1:%2] %3")
+                                       .arg(cleanIP)
+                                       .arg(senderSocket->peerPort())
+                                       .arg(message);
+
+        // 广播消息
+        for (QTcpSocket *socket : clientSockets) {
+            if (socket == senderSocket) continue;
+            if (socket->state() == QTcpSocket::ConnectedState) {
+                socket->write(broadcastMessage.toUtf8());
+            }
         }
 
-        // 只有客户端处于“已连接”状态才发送
-        if (socket->state() == QTcpSocket::ConnectedState) {
-            socket->write(broadcastMessage.toUtf8());  // 转换为字节数组发送
-        }
+        QString log = QString("[%1] 转发消息 → %2")
+                          .arg(QDateTime::currentDateTime().toString("HH:mm:ss"))
+                          .arg(broadcastMessage);
+        ui->logTextEdit->append(log);
+        return;
     }
 
-    // 更新服务器状态（显示最新消息）
-    QString log = QString("[%1] 转发消息 → %2")
-                      .arg(QDateTime::currentDateTime().toString("HH:mm:ss"))
-                      .arg(broadcastMessage);
-    ui->logTextEdit->append(log);
+    QJsonObject jsonObj = jsonDoc.object();
+
+    // 获取消息类型
+    QString messageType = jsonObj.value("type").toString();
+
+    if (messageType == "message") {
+        // 处理普通消息
+        QString content = jsonObj.value("content").toString();
+        QString senderName = jsonObj.value("sender").toString(); // 客户端可以指定昵称
+
+        // 如果客户端没有指定昵称，使用 IP:端口
+        if (senderName.isEmpty()) {
+            QString rawIP = senderSocket->peerAddress().toString();
+            QString cleanIP = formatClientIP(rawIP);
+            senderName = QString("%1:%2").arg(cleanIP).arg(senderSocket->peerPort());
+        }
+
+        // 创建广播消息 JSON
+        QJsonObject broadcastJson;
+        broadcastJson.insert("type", "broadcast");
+        broadcastJson.insert("sender", senderName);
+        broadcastJson.insert("content", content);
+        broadcastJson.insert("time", QDateTime::currentDateTime().toString("HH:mm:ss"));
+
+        QJsonDocument broadcastDoc(broadcastJson);
+        QByteArray broadcastData = broadcastDoc.toJson(QJsonDocument::Compact);
+
+        // 广播消息
+        for (QTcpSocket *socket : clientSockets) {
+            if (socket == senderSocket) continue;
+            if (socket->state() == QTcpSocket::ConnectedState) {
+                socket->write(broadcastData);
+            }
+        }
+
+        // 更新服务器日志
+        QString log = QString("[%1] 转发消息 → 来自: %2, 内容: %3")
+                          .arg(QDateTime::currentDateTime().toString("HH:mm:ss"))
+                          .arg(senderName)
+                          .arg(content);
+        ui->logTextEdit->append(log);
+
+    } else if (messageType == "connect") {
+        // 处理连接消息（客户端首次连接时发送）
+        QString clientName = jsonObj.value("name").toString();
+        QString rawIP = senderSocket->peerAddress().toString();
+        QString cleanIP = formatClientIP(rawIP);
+
+        // 通知其他客户端有新用户加入
+        QJsonObject notifyJson;
+        notifyJson.insert("type", "user_join");
+        notifyJson.insert("username", clientName.isEmpty() ? cleanIP : clientName);
+        notifyJson.insert("time", QDateTime::currentDateTime().toString("HH:mm:ss"));
+
+        QJsonDocument notifyDoc(notifyJson);
+        QByteArray notifyData = notifyDoc.toJson(QJsonDocument::Compact);
+
+        for (QTcpSocket *socket : clientSockets) {
+            if (socket != senderSocket && socket->state() == QTcpSocket::ConnectedState) {
+                socket->write(notifyData);
+            }
+        }
+
+    } else if (messageType == "disconnect") {
+        // 处理断开连接消息（客户端正常断开时发送）
+        // 类似上面的处理
+    }
 }
 
 // 处理客户端断开连接
