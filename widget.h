@@ -40,6 +40,7 @@ private:
     Ui::Widget *ui;
     QTcpServer *tcpServer;  // 服务器对象指针
     QList<QTcpSocket*> clientSockets;  // 存储所有已连接的客户端套接字
+    QMap<QTcpSocket*, QString> clientUsers;  // 存储socket对应的用户名
 };
 
 #endif // WIDGET_H
